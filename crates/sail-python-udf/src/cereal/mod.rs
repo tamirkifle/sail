@@ -49,23 +49,31 @@ fn supports_kwargs(eval_type: spec::PySparkUdfType) -> bool {
         | PySparkUdfType::GroupedMapPandas
         | PySparkUdfType::GroupedMapArrow
         | PySparkUdfType::WindowAggPandas
+        | PySparkUdfType::WindowAggArrow
         | PySparkUdfType::MapPandasIter
         | PySparkUdfType::CogroupedMapPandas
         | PySparkUdfType::CogroupedMapArrow
         | PySparkUdfType::MapArrowIter
         | PySparkUdfType::GroupedMapPandasWithState
-        | PySparkUdfType::Table
-        | PySparkUdfType::ArrowTable => false,
-        PySparkUdfType::Batched
+        | PySparkUdfType::TransformWithStatePandas
+        | PySparkUdfType::TransformWithStatePandasInitState
+        | PySparkUdfType::TransformWithStatePythonRow
+        | PySparkUdfType::TransformWithStatePythonRowInitState
+        | PySparkUdfType::GroupedMapArrowIter
+        | PySparkUdfType::GroupedMapPandasIter => false,
+        PySparkUdfType::Table
+        | PySparkUdfType::ArrowTable
+        | PySparkUdfType::ArrowUdtf
+        | PySparkUdfType::Batched
         | PySparkUdfType::ArrowBatched
         | PySparkUdfType::ScalarPandas
         | PySparkUdfType::GroupedAggPandas
+        | PySparkUdfType::GroupedAggPandasIter
         | PySparkUdfType::ScalarPandasIter
-        // Arrow scalar/agg UDFs use the kwargs protocol even if they don't support named args.
-        // PySpark's read_single_udf always reads the kwargs flag byte for these types.
         | PySparkUdfType::ScalarArrow
         | PySparkUdfType::ScalarArrowIter
-        | PySparkUdfType::GroupedAggArrow => true,
+        | PySparkUdfType::GroupedAggArrow
+        | PySparkUdfType::GroupedAggArrowIter => true,
     }
 }
 
@@ -79,17 +87,26 @@ fn should_write_config(eval_type: spec::PySparkUdfType) -> bool {
         | PySparkUdfType::GroupedMapPandas
         | PySparkUdfType::GroupedMapArrow
         | PySparkUdfType::GroupedAggPandas
+        | PySparkUdfType::GroupedAggPandasIter
         | PySparkUdfType::WindowAggPandas
+        | PySparkUdfType::WindowAggArrow
         | PySparkUdfType::ScalarPandasIter
         | PySparkUdfType::MapPandasIter
         | PySparkUdfType::CogroupedMapPandas
         | PySparkUdfType::CogroupedMapArrow
         | PySparkUdfType::MapArrowIter
         | PySparkUdfType::GroupedMapPandasWithState
-        | PySparkUdfType::ArrowTable
-        // Arrow-native UDFs need config for timezone, arrow batch size, etc.
+        | PySparkUdfType::TransformWithStatePandas
+        | PySparkUdfType::TransformWithStatePandasInitState
+        | PySparkUdfType::TransformWithStatePythonRow
+        | PySparkUdfType::TransformWithStatePythonRowInitState
+        | PySparkUdfType::GroupedMapArrowIter
+        | PySparkUdfType::GroupedMapPandasIter
         | PySparkUdfType::ScalarArrow
         | PySparkUdfType::ScalarArrowIter
-        | PySparkUdfType::GroupedAggArrow => true,
+        | PySparkUdfType::GroupedAggArrow
+        | PySparkUdfType::GroupedAggArrowIter
+        | PySparkUdfType::ArrowTable
+        | PySparkUdfType::ArrowUdtf => true,
     }
 }

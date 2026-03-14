@@ -142,7 +142,12 @@ impl PlanResolver<'_> {
                     &self.config.pyspark_udf_config,
                 )?;
                 let (function, arguments) = match function.eval_type {
-                    spec::PySparkUdfType::GroupedAggPandas => {
+                    spec::PySparkUdfType::GroupedAggPandas
+                    | spec::PySparkUdfType::GroupedAggPandasIter
+                    | spec::PySparkUdfType::GroupedAggArrow
+                    | spec::PySparkUdfType::GroupedAggArrowIter
+                    | spec::PySparkUdfType::WindowAggPandas
+                    | spec::PySparkUdfType::WindowAggArrow => {
                         // DataFusion requires at least one input to an aggregate function.
                         // For 0-arg UDFs inject a dummy Int64 literal; the accumulator strips it.
                         let actual_arg_count = arguments.len();

@@ -161,13 +161,21 @@ impl PlanResolver<'_> {
             | PySparkUdfType::GroupedMapPandas
             | PySparkUdfType::GroupedMapArrow
             | PySparkUdfType::WindowAggPandas
+            | PySparkUdfType::WindowAggArrow
             | PySparkUdfType::MapPandasIter
             | PySparkUdfType::CogroupedMapPandas
             | PySparkUdfType::CogroupedMapArrow
             | PySparkUdfType::MapArrowIter
             | PySparkUdfType::GroupedMapPandasWithState
+            | PySparkUdfType::TransformWithStatePandas
+            | PySparkUdfType::TransformWithStatePandasInitState
+            | PySparkUdfType::TransformWithStatePythonRow
+            | PySparkUdfType::TransformWithStatePythonRowInitState
+            | PySparkUdfType::GroupedMapArrowIter
+            | PySparkUdfType::GroupedMapPandasIter
             | PySparkUdfType::Table
-            | PySparkUdfType::ArrowTable => Err(PlanError::invalid(format!(
+            | PySparkUdfType::ArrowTable
+            | PySparkUdfType::ArrowUdtf => Err(PlanError::invalid(format!(
                 "unsupported Python UDF type for common inline UDF: {:?}",
                 function.eval_type
             ))),
@@ -231,7 +239,7 @@ impl PlanResolver<'_> {
                     args: arguments,
                 }))
             }
-            PySparkUdfType::GroupedAggPandas => {
+            PySparkUdfType::GroupedAggPandas | PySparkUdfType::GroupedAggPandasIter => {
                 // Spark CheckAnalysis: aggregate functions cannot be nested inside another
                 // aggregate function's arguments.
                 for arg in &arguments {
@@ -311,8 +319,8 @@ impl PlanResolver<'_> {
                     args: arguments,
                 }))
             }
-            // Arrow-native grouped aggregate UDF (252): user func receives pa.Arrays, returns scalar
-            PySparkUdfType::GroupedAggArrow => {
+            // Arrow-native grouped aggregate UDF (252) and iterator variant (254)
+            PySparkUdfType::GroupedAggArrow | PySparkUdfType::GroupedAggArrowIter => {
                 // Spark CheckAnalysis: aggregate functions cannot be nested inside another
                 // aggregate function's arguments.
                 for arg in &arguments {
