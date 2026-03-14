@@ -53,20 +53,7 @@ impl PlanResolver<'_> {
         let function_name: String = function_name.into();
 
         // Separate positional args from named (keyword) args before resolution
-        let mut positional_args = Vec::new();
-        let mut kwarg_names: Vec<Option<String>> = Vec::new();
-        for arg in arguments {
-            match arg {
-                spec::Expr::NamedArgument { key, value } => {
-                    positional_args.push(*value);
-                    kwarg_names.push(Some(key));
-                }
-                other => {
-                    positional_args.push(other);
-                    kwarg_names.push(None);
-                }
-            }
-        }
+        let (positional_args, kwarg_names) = Self::extract_kwargs(arguments);
 
         // Validate named arguments before building the payload:
         // 1. No duplicate kwarg names → DUPLICATE_ROUTINE_PARAMETER_ASSIGNMENT.DOUBLE_NAMED_ARGUMENT_REFERENCE
@@ -320,8 +307,7 @@ impl PlanResolver<'_> {
                 }))
             }
             // Arrow-native grouped aggregate UDF (252) and iterator variant (254)
-            PySparkUdfType::GroupedAggArrow | PySparkUdfType::GroupedAggArrowIter => {
-                // Spark CheckAnalysis: aggregate functions cannot be nested inside another
+            PySparkUdfType::GroupedAggArrow | PySparkUdfType::GroupedAggArrowIter => {                // Spark CheckAnalysis: aggregate functions cannot be nested inside another
                 // aggregate function's arguments.
                 for arg in &arguments {
                     if let Some(inner) = find_aggregate_in_expr(arg) {
@@ -369,5 +355,28 @@ impl PlanResolver<'_> {
                 }))
             }
         }
+    }
+
+    /// Splits a list of spec expressions into positional expressions and a parallel
+    /// vector of optional kwarg names. `NamedArgument` variants are unwrapped; all
+    /// other expressions get `None` in the kwarg slot.
+    pub(crate) fn extract_kwargs(
+        arguments: Vec<spec::Expr>,
+    ) -> (Vec<spec::Expr>, Vec<Option<String>>) {
+        let mut exprs = Vec::with_capacity(arguments.len());
+        let mut kwargs = Vec::with_capacity(arguments.len());
+        for arg in arguments {
+            match arg {
+                spec::Expr::NamedArgument { key, value } => {
+                    kwargs.push(Some(key));
+                    exprs.push(*value);
+                }
+                other => {
+                    kwargs.push(None);
+                    exprs.push(other);
+                }
+            }
+        }
+        (exprs, kwargs)
     }
 }
