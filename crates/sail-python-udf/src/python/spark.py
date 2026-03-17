@@ -604,15 +604,25 @@ class PySparkGroupAggArrowUdf:
         config,
     ):
         self._udf = udf
-        # No Pandas serializer — data stays in Arrow format
+        self._serializer = ArrowStreamPandasUDFSerializer(
+            timezone=config.session_timezone,
+            safecheck=config.arrow_convert_safely,
+            assign_cols_by_name=config.assign_columns_by_name,
+            df_for_struct=False,
+            struct_in_pandas="row",
+            ndarray_as_list=True,
+            arrow_cast=True,
+        )
 
     def __call__(self, args: list[pa.Array]) -> pa.Array:
-        # Pass Arrow arrays directly (no Pandas conversion)
         [(output, output_type)] = list(self._udf(None, (args,)))
-        # output is pa.array([scalar_result]) from PySpark's wrapper
-        if output.type != output_type:
-            output = output.cast(output_type)
-        return output
+        if isinstance(output, (pa.Array, pa.ChunkedArray)):
+            if isinstance(output, pa.ChunkedArray):
+                output = output.combine_chunks()
+            if output.type != output_type:
+                output = output.cast(output_type)
+            return output
+        return _pandas_to_arrow_array(output, output_type, self._serializer)
 
 
 class PySparkGroupMapUdf:
