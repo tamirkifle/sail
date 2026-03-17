@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use arrow::datatypes::DataType;
-use datafusion_common::{DFSchemaRef, DataFusionError};
 use datafusion_common::tree_node::{TreeNode, TreeNodeRecursion};
+use datafusion_common::{DFSchemaRef, DataFusionError};
 use datafusion_expr::expr::AggregateFunctionParams;
 use datafusion_expr::{expr, AggregateUDF, Expr, ExprSchemable, ScalarUDF};
 use sail_common::spec;
@@ -307,7 +307,8 @@ impl PlanResolver<'_> {
                 }))
             }
             // Arrow-native grouped aggregate UDF (252) and iterator variant (254)
-            PySparkUdfType::GroupedAggArrow | PySparkUdfType::GroupedAggArrowIter => {                // Spark CheckAnalysis: aggregate functions cannot be nested inside another
+            PySparkUdfType::GroupedAggArrow | PySparkUdfType::GroupedAggArrowIter => {
+                // Spark CheckAnalysis: aggregate functions cannot be nested inside another
                 // aggregate function's arguments.
                 for arg in &arguments {
                     if let Some(inner) = find_aggregate_in_expr(arg) {

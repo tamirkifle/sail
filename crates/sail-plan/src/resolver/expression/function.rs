@@ -54,14 +54,12 @@ impl PlanResolver<'_> {
         // a proper AnalysisException instead of letting it crash in the Python worker.
         {
             let mut seen_kwarg_names = std::collections::HashSet::new();
-            for kwarg in &kwarg_names {
-                if let Some(name) = kwarg {
-                    if !seen_kwarg_names.insert(name.as_str()) {
-                        return Err(PlanError::AnalysisError(format!(
-                            "[DUPLICATE_ROUTINE_PARAMETER_ASSIGNMENT.DOUBLE_NAMED_ARGUMENT_REFERENCE] \
-                             Duplicate named argument: '{name}' is assigned more than once."
-                        )));
-                    }
+            for name in kwarg_names.iter().flatten() {
+                if !seen_kwarg_names.insert(name.as_str()) {
+                    return Err(PlanError::AnalysisError(format!(
+                        "[DUPLICATE_ROUTINE_PARAMETER_ASSIGNMENT.DOUBLE_NAMED_ARGUMENT_REFERENCE] \
+                         Duplicate named argument: '{name}' is assigned more than once."
+                    )));
                 }
             }
         }

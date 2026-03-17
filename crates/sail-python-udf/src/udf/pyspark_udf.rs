@@ -106,9 +106,7 @@ impl PySparkUDF {
                     PySpark::scalar_pandas_iter_udf(py, udf, &self.config)?
                 }
                 // Arrow-native: no Pandas conversion, pass Arrow arrays directly
-                PySparkUdfKind::ScalarArrow => {
-                    PySpark::scalar_arrow_udf(py, udf, &self.config)?
-                }
+                PySparkUdfKind::ScalarArrow => PySpark::scalar_arrow_udf(py, udf, &self.config)?,
                 PySparkUdfKind::ScalarArrowIter => {
                     PySpark::scalar_arrow_iter_udf(py, udf, &self.config)?
                 }

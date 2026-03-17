@@ -115,18 +115,13 @@ impl PySparkGroupAggregateUDF {
             let loaded = PySparkUdfPayload::load(py, &self.payload)?;
             let wrapped = match self.kind {
                 // Pandas path: wraps Arrow → named Pandas Series → user func → Arrow
-                PySparkGroupAggKind::Pandas => PySpark::group_agg_udf(
-                    py,
-                    loaded,
-                    self.input_names.clone(),
-                    &self.config,
-                )?,
+                PySparkGroupAggKind::Pandas => {
+                    PySpark::group_agg_udf(py, loaded, self.input_names.clone(), &self.config)?
+                }
                 // Arrow path: passes Arrow arrays directly to user func
-                PySparkGroupAggKind::Arrow => PySpark::group_agg_arrow_udf(
-                    py,
-                    loaded,
-                    &self.config,
-                )?,
+                PySparkGroupAggKind::Arrow => {
+                    PySpark::group_agg_arrow_udf(py, loaded, &self.config)?
+                }
             };
             Ok(wrapped.unbind())
         })?;

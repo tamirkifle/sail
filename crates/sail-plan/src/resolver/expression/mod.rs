@@ -325,11 +325,9 @@ impl PlanResolver<'_> {
                     .await
             }
             // NamedArgument should only appear inside UDF argument lists, not standalone
-            Expr::NamedArgument { .. } => {
-                Err(PlanError::invalid(
-                    "named argument expression can only be used in UDF arguments",
-                ))
-            }
+            Expr::NamedArgument { .. } => Err(PlanError::invalid(
+                "named argument expression can only be used in UDF arguments",
+            )),
         }
     }
 
