@@ -30,6 +30,7 @@ def udf_add():
 
     return add
 
+
 @pytest.fixture(scope="module")
 def udf_concat():
     @udf(StringType())
