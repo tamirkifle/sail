@@ -50,21 +50,21 @@ Feature: TIME functions (make_time, time_diff, time_trunc)
     Scenario: make_time invalid hour errors
       When query
       """
-      SELECT make_time(25, 0, 0)
+      SELECT CAST(make_time(25, 0, 0) AS STRING)
       """
       Then query error HourOfDay
 
     Scenario: make_time invalid minute errors
       When query
       """
-      SELECT make_time(0, 60, 0)
+      SELECT CAST(make_time(0, 60, 0) AS STRING)
       """
       Then query error MinuteOfHour
 
     Scenario: make_time invalid second errors
       When query
       """
-      SELECT make_time(0, 0, 60)
+      SELECT CAST(make_time(0, 0, 60) AS STRING)
       """
       Then query error SecondOfMinute
 
@@ -247,7 +247,7 @@ Feature: TIME functions (make_time, time_diff, time_trunc)
     Scenario: time_trunc invalid unit errors
       When query
       """
-      SELECT time_trunc('MS', TIME '09:32:05.123456')
+      SELECT CAST(time_trunc('MS', TIME '09:32:05.123456') AS STRING)
       """
       Then query error unsupported unit
 
