@@ -47,6 +47,27 @@ Feature: TIME functions (make_time, time_diff, time_trunc)
       | result |
       | NULL   |
 
+    Scenario: make_time invalid hour errors
+      When query
+      """
+      SELECT make_time(25, 0, 0)
+      """
+      Then query error HourOfDay
+
+    Scenario: make_time invalid minute errors
+      When query
+      """
+      SELECT make_time(0, 60, 0)
+      """
+      Then query error MinuteOfHour
+
+    Scenario: make_time invalid second errors
+      When query
+      """
+      SELECT make_time(0, 0, 60)
+      """
+      Then query error SecondOfMinute
+
 
   Rule: time_diff
 
@@ -140,6 +161,24 @@ Feature: TIME functions (make_time, time_diff, time_trunc)
       | result |
       | NULL   |
 
+    Scenario: time_diff invalid unit errors
+      When query
+      """
+      SELECT time_diff('MS', TIME '10:00:00', TIME '11:00:00')
+      """
+      Then query error unsupported unit
+
+    Scenario: time_diff with unit from column
+      When query
+      """
+      SELECT time_diff(unit, TIME '08:00:00', TIME '10:30:00') AS result
+      FROM (VALUES ('HOUR'), ('MINUTE')) AS t(unit)
+      """
+      Then query result
+      | result |
+      | 2      |
+      | 150    |
+
   Rule: time_trunc
 
     Scenario: time_trunc hour
@@ -204,3 +243,22 @@ Feature: TIME functions (make_time, time_diff, time_trunc)
       Then query result
       | result |
       | NULL   |
+
+    Scenario: time_trunc invalid unit errors
+      When query
+      """
+      SELECT time_trunc('MS', TIME '09:32:05.123456')
+      """
+      Then query error unsupported unit
+
+    Scenario: time_trunc with unit from column
+      When query
+      """
+      SELECT time_trunc(unit, TIME '09:32:05.359') AS result
+      FROM (VALUES ('HOUR'), ('MINUTE'), ('SECOND')) AS t(unit)
+      """
+      Then query result
+      | result   |
+      | 09:00:00 |
+      | 09:32:00 |
+      | 09:32:05 |
