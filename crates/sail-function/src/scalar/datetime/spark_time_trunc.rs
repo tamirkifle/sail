@@ -1,12 +1,12 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use datafusion::arrow::array::{Array, PrimitiveBuilder};
+use datafusion::arrow::array::{
+    new_null_array, Array, ArrayRef, AsArray, PrimitiveArray, PrimitiveBuilder, StringArrayType,
+};
 use datafusion::arrow::datatypes::{DataType, Time64MicrosecondType, TimeUnit};
 use datafusion_common::{exec_err, Result, ScalarValue};
 use datafusion_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
-
-use crate::scalar::datetime::utils::to_time64_array;
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct SparkTimeTrunc {
@@ -62,58 +62,109 @@ impl ScalarUDFImpl for SparkTimeTrunc {
             args, number_rows, ..
         } = args;
 
-        if args.len() != 2 {
+        let [unit_arg, time_arg] = args.as_slice() else {
             return exec_err!(
                 "Spark `time_trunc` function requires 2 arguments, got {}",
                 args.len()
             );
-        }
-
-        let contains_scalar_null = args.iter().any(|arg| {
-            matches!(arg, ColumnarValue::Scalar(ScalarValue::Utf8(None)))
-                || matches!(arg, ColumnarValue::Scalar(ScalarValue::LargeUtf8(None)))
-                || matches!(
-                    arg,
-                    ColumnarValue::Scalar(ScalarValue::Time64Microsecond(None))
-                )
-                || matches!(arg, ColumnarValue::Scalar(ScalarValue::Null))
-        });
-        if contains_scalar_null {
-            return Ok(ColumnarValue::Scalar(ScalarValue::Time64Microsecond(None)));
-        }
-
-        // Extract unit string (must be a scalar/literal)
-        let unit_str = match &args[0] {
-            ColumnarValue::Scalar(ScalarValue::Utf8(Some(s))) => s.clone(),
-            ColumnarValue::Scalar(ScalarValue::LargeUtf8(Some(s))) => s.clone(),
-            _ => {
-                return exec_err!("time_trunc: unit must be a string literal");
-            }
         };
 
-        let divisor = match truncation_divisor(&unit_str) {
-            Some(d) => d,
-            None => {
-                return exec_err!(
-                    "time_trunc: unsupported unit '{}'. Supported: HOUR, MINUTE, SECOND, MILLISECOND, MICROSECOND",
-                    unit_str
-                );
+        match (unit_arg, time_arg) {
+            // (Scalar unit, Scalar time) — return a scalar
+            (ColumnarValue::Scalar(unit_sv), ColumnarValue::Scalar(time_sv)) => {
+                let unit_opt = match unit_sv {
+                    ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => {
+                        Some(s.as_str())
+                    }
+                    ScalarValue::Utf8(None) | ScalarValue::LargeUtf8(None) | ScalarValue::Null => {
+                        None
+                    }
+                    _ => return exec_err!("time_trunc: unit must be a string"),
+                };
+                let time_opt = match time_sv {
+                    ScalarValue::Time64Microsecond(v) => *v,
+                    _ => return exec_err!("time_trunc: time must be TIME"),
+                };
+                let result = match (unit_opt, time_opt) {
+                    (Some(unit), Some(time)) => {
+                        let divisor = match truncation_divisor(unit) {
+                            Some(d) => d,
+                            None => return exec_err!(
+                                "time_trunc: unsupported unit '{}'. Supported: HOUR, MINUTE, SECOND, MILLISECOND, MICROSECOND",
+                                unit
+                            ),
+                        };
+                        Some(time - (time % divisor))
+                    }
+                    _ => None,
+                };
+                Ok(ColumnarValue::Scalar(ScalarValue::Time64Microsecond(
+                    result,
+                )))
             }
-        };
-
-        let times = to_time64_array(&args[1], "time", "time_trunc", number_rows)?;
-
-        let mut builder = PrimitiveBuilder::<Time64MicrosecondType>::with_capacity(number_rows);
-        for i in 0..number_rows {
-            if times.is_null(i) {
-                builder.append_null();
-            } else {
-                let val = times.value(i);
-                builder.append_value(val - (val % divisor));
+            // (Scalar unit, Array time) — constant divisor across all rows
+            (ColumnarValue::Scalar(unit_sv), ColumnarValue::Array(time_array)) => {
+                let unit_opt = match unit_sv {
+                    ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => {
+                        Some(s.as_str())
+                    }
+                    ScalarValue::Utf8(None) | ScalarValue::LargeUtf8(None) | ScalarValue::Null => {
+                        None
+                    }
+                    _ => return exec_err!("time_trunc: unit must be a string"),
+                };
+                match unit_opt {
+                    None => Ok(ColumnarValue::Array(new_null_array(
+                        &DataType::Time64(TimeUnit::Microsecond),
+                        number_rows,
+                    ))),
+                    Some(unit) => {
+                        let divisor = match truncation_divisor(unit) {
+                            Some(d) => d,
+                            None => return exec_err!(
+                                "time_trunc: unsupported unit '{}'. Supported: HOUR, MINUTE, SECOND, MILLISECOND, MICROSECOND",
+                                unit
+                            ),
+                        };
+                        let times = time_array.as_primitive::<Time64MicrosecondType>();
+                        let result = times
+                            .iter()
+                            .map(|t| t.map(|v| v - (v % divisor)))
+                            .collect::<PrimitiveArray<Time64MicrosecondType>>();
+                        Ok(ColumnarValue::Array(Arc::new(result) as ArrayRef))
+                    }
+                }
+            }
+            // (Array unit, Scalar or Array time) — per-row unit lookup
+            (ColumnarValue::Array(unit_array), time_arg) => {
+                let times = match time_arg {
+                    ColumnarValue::Array(a) => a.as_primitive::<Time64MicrosecondType>().to_owned(),
+                    ColumnarValue::Scalar(ScalarValue::Time64Microsecond(Some(v))) => {
+                        PrimitiveArray::<Time64MicrosecondType>::from_value(*v, number_rows)
+                    }
+                    ColumnarValue::Scalar(ScalarValue::Time64Microsecond(None)) => {
+                        return Ok(ColumnarValue::Array(new_null_array(
+                            &DataType::Time64(TimeUnit::Microsecond),
+                            number_rows,
+                        )));
+                    }
+                    _ => return exec_err!("time_trunc: time must be TIME"),
+                };
+                let result = match unit_array.data_type() {
+                    DataType::Utf8 => {
+                        trunc_time_rows(unit_array.as_string::<i32>(), &times, number_rows)
+                    }
+                    DataType::LargeUtf8 => {
+                        trunc_time_rows(unit_array.as_string::<i64>(), &times, number_rows)
+                    }
+                    DataType::Utf8View => {
+                        trunc_time_rows(unit_array.as_string_view(), &times, number_rows)
+                    }
+                    _ => exec_err!("time_trunc: unit must be a string"),
+                }?;
+                Ok(ColumnarValue::Array(result))
             }
         }
-
-        Ok(ColumnarValue::Array(Arc::new(builder.finish())))
     }
 
     fn coerce_types(&self, arg_types: &[DataType]) -> Result<Vec<DataType>> {
@@ -128,4 +179,31 @@ impl ScalarUDFImpl for SparkTimeTrunc {
             DataType::Time64(TimeUnit::Microsecond),
         ])
     }
+}
+
+/// Per-row truncation when unit comes from a string array column.
+fn trunc_time_rows<'a, S>(
+    unit_array: &'a S,
+    times: &PrimitiveArray<Time64MicrosecondType>,
+    number_rows: usize,
+) -> Result<ArrayRef>
+where
+    &'a S: StringArrayType<'a>,
+{
+    let mut builder = PrimitiveBuilder::<Time64MicrosecondType>::with_capacity(number_rows);
+    for (unit_opt, time_opt) in unit_array.iter().zip(times.iter()) {
+        match (unit_opt, time_opt) {
+            (None, _) | (_, None) => builder.append_null(),
+            (Some(unit), Some(val)) => match truncation_divisor(unit) {
+                Some(divisor) => builder.append_value(val - (val % divisor)),
+                None => {
+                    return exec_err!(
+                        "time_trunc: unsupported unit '{}'. Supported: HOUR, MINUTE, SECOND, MILLISECOND, MICROSECOND",
+                        unit
+                    )
+                }
+            },
+        }
+    }
+    Ok(Arc::new(builder.finish()) as ArrayRef)
 }
