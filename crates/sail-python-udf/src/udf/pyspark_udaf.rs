@@ -45,6 +45,7 @@ pub struct PySparkGroupAggregateUDF {
 }
 
 impl PySparkGroupAggregateUDF {
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         kind: PySparkGroupAggKind,
         name: String,
