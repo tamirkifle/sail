@@ -163,7 +163,7 @@ fn make_time(hour: i32, minute: i32, sec_unscaled: i128) -> Result<i64> {
     if !(0..60 * SCALE_FACTOR).contains(&sec_unscaled) {
         return exec_err!(
             "make_time: Invalid value for SecondOfMinute (valid values 0 - 59): {}",
-            sec_unscaled / SCALE_FACTOR
+            ScalarValue::Decimal128(Some(sec_unscaled), SECONDS_PRECISION, SECONDS_SCALE)
         );
     }
 
