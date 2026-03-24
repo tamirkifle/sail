@@ -29,7 +29,7 @@ impl PlanResolver<'_> {
         let state = scope.state();
         let spec::UnresolvedFunction {
             function_name,
-            mut arguments,
+            arguments,
             named_arguments,
             is_distinct,
             is_user_defined_function: _,
@@ -42,9 +42,13 @@ impl PlanResolver<'_> {
         let Ok(function_name) = <Vec<String>>::from(function_name).one() else {
             return Err(PlanError::unsupported("qualified function name"));
         };
-        // Merge named_arguments into positional arguments, tracking kwarg keys.
-        // PySpark sends kwargs as named_arguments on UnresolvedFunction for registered UDFs.
-        let mut kwarg_names: Vec<Option<String>> = arguments.iter().map(|_| None).collect();
+        // Extract any NamedArgument entries embedded in arguments (Spark Connect inline path).
+        // PySpark encodes kwargs as NamedArgumentExpression inside the arguments[] repeated field,
+        // which are converted to spec::Expr::NamedArgument. extract_kwargs peels those out before
+        // resolve_expressions_and_names, which would otherwise reject them as standalone expressions.
+        let (mut arguments, mut kwarg_names) = Self::extract_kwargs(arguments);
+        // Also merge named_arguments from spec::UnresolvedFunction (SQL analyzer path).
+        // PySpark sends registered-UDF kwargs here rather than as embedded NamedArgument entries.
         for (key, value) in named_arguments {
             kwarg_names.push(Some(key.into()));
             arguments.push(value);
