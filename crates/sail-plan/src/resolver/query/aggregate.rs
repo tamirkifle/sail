@@ -58,7 +58,7 @@ impl PlanResolver<'_> {
         for proj in &projections {
             if let Some(name) = find_volatile_in_aggregate_context(&proj.expr) {
                 return Err(PlanError::AnalysisError(format!(
-                    "Non-deterministic expression {name} should not appear in the arguments of an aggregate function",
+                    "Non-deterministic expression {name} should not appear in an aggregate query",
                 )));
             }
         }
