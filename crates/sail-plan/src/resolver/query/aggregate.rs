@@ -4,6 +4,7 @@ use datafusion_expr::utils::{expr_as_column_expr, find_aggregate_exprs};
 use datafusion_expr::{Expr, LogicalPlan, LogicalPlanBuilder, Volatility};
 use sail_common::spec;
 use sail_common_datafusion::utils::items::ItemTaker;
+use sail_python_udf::get_udf_display_name;
 use sail_python_udf::udf::pyspark_udaf::PySparkGroupAggregateUDF;
 
 use crate::error::{PlanError, PlanResult};
@@ -79,10 +80,9 @@ impl PlanResolver<'_> {
                             .is_some()
                         {
                             if pyspark_agg_name.is_none() {
-                                // Strip the "@hash" suffix to get the Python function name
                                 let full = agg.func.name();
-                                let human = full.split('@').next().unwrap_or(full);
-                                pyspark_agg_name = Some(human.to_string());
+                                pyspark_agg_name =
+                                    Some(get_udf_display_name(full).to_string());
                             }
                         } else {
                             has_regular_agg = true;
