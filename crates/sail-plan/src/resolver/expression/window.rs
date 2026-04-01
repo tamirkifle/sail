@@ -149,6 +149,12 @@ impl PlanResolver<'_> {
                     | spec::PySparkUdfType::GroupedAggArrowIter
                     | spec::PySparkUdfType::WindowAggPandas
                     | spec::PySparkUdfType::WindowAggArrow => {
+                        let kind = match function.eval_type {
+                            spec::PySparkUdfType::GroupedAggArrow
+                            | spec::PySparkUdfType::GroupedAggArrowIter
+                            | spec::PySparkUdfType::WindowAggArrow => PySparkGroupAggKind::Arrow,
+                            _ => PySparkGroupAggKind::Pandas,
+                        };
                         // DataFusion requires at least one input to an aggregate function.
                         // For 0-arg UDFs inject a dummy Int64 literal; the accumulator strips it.
                         let actual_arg_count = arguments.len();
@@ -161,7 +167,7 @@ impl PlanResolver<'_> {
                             (arguments, input_types)
                         };
                         let udaf = PySparkGroupAggregateUDF::new(
-                            PySparkGroupAggKind::Pandas, // Pandas window aggregate path
+                            kind,
                             get_udf_name(&function_name, &payload),
                             payload,
                             deterministic,
