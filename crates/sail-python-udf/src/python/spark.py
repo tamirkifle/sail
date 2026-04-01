@@ -508,61 +508,61 @@ class PySparkScalarPandasIterUdf:
 
 
 class PySparkScalarArrowUdf:
+    """Arrow-native scalar UDF (eval_type 250).
+
+    The user function receives and returns pyarrow.Array directly.
+    No Pandas conversion is performed.
+    """
+
     def __init__(
         self,
         udf: Callable[..., Any],
         config,
     ):
         self._udf = udf
-        self._serializer = ArrowStreamPandasUDFSerializer(
-            timezone=config.session_timezone,
-            safecheck=config.arrow_convert_safely,
-            assign_cols_by_name=config.assign_columns_by_name,
-            df_for_struct=False,
-            struct_in_pandas="row",
-            ndarray_as_list=True,
-            arrow_cast=True,
-        )
 
     def __call__(self, args: list[pa.Array], _num_rows: int) -> pa.Array:
         inputs = tuple(args)
         [(output, output_type)] = list(self._udf(None, (inputs,)))
-        if isinstance(output, (pa.Array, pa.ChunkedArray)):
-            if isinstance(output, pa.ChunkedArray):
-                output = output.combine_chunks()
-            if output.type != output_type:
-                output = output.cast(output_type)
-            return output
-        return _pandas_to_arrow_array(output, output_type, self._serializer)
+        if isinstance(output, pa.ChunkedArray):
+            output = output.combine_chunks()
+        if not isinstance(output, pa.Array):
+            raise TypeError(
+                f"Arrow UDF (eval_type 250) must return a pyarrow.Array, "
+                f"got {type(output).__name__!r}"
+            )
+        if output.type != output_type:
+            output = output.cast(output_type)
+        return output
 
 
 class PySparkScalarArrowIterUdf:
+    """Arrow-native scalar iterator UDF (eval_type 251).
+
+    The user function receives and returns Iterator[pyarrow.Array] directly.
+    No Pandas conversion is performed.
+    """
+
     def __init__(
         self,
         udf: Callable[..., Any],
         config,
     ):
         self._udf = udf
-        self._serializer = ArrowStreamPandasUDFSerializer(
-            timezone=config.session_timezone,
-            safecheck=config.arrow_convert_safely,
-            assign_cols_by_name=config.assign_columns_by_name,
-            df_for_struct=False,
-            struct_in_pandas="row",
-            ndarray_as_list=True,
-            arrow_cast=True,
-        )
 
     def __call__(self, args: list[pa.Array], _num_rows: int) -> pa.Array:
         inputs = tuple(args)
         [(output, output_type)] = list(self._udf(None, [inputs]))
-        if isinstance(output, (pa.Array, pa.ChunkedArray)):
-            if isinstance(output, pa.ChunkedArray):
-                output = output.combine_chunks()
-            if output.type != output_type:
-                output = output.cast(output_type)
-            return output
-        return _pandas_to_arrow_array(output, output_type, self._serializer)
+        if isinstance(output, pa.ChunkedArray):
+            output = output.combine_chunks()
+        if not isinstance(output, pa.Array):
+            raise TypeError(
+                f"Arrow iterator UDF (eval_type 251) must return a pyarrow.Array, "
+                f"got {type(output).__name__!r}"
+            )
+        if output.type != output_type:
+            output = output.cast(output_type)
+        return output
 
 
 class PySparkGroupAggUdf:
@@ -593,9 +593,8 @@ class PySparkGroupAggUdf:
 class PySparkGroupAggArrowUdf:
     """Arrow-native grouped aggregate UDF (eval_type 252).
 
-    Like GroupedAggPandas (202) but the user function receives pyarrow.Array
-    columns directly and returns a scalar value. PySpark's wrapper wraps
-    the scalar in pa.array([result]) before returning.
+    The user function receives pyarrow.Array columns directly and returns
+    a scalar. No Pandas conversion is performed.
     """
 
     def __init__(
@@ -604,25 +603,19 @@ class PySparkGroupAggArrowUdf:
         config,
     ):
         self._udf = udf
-        self._serializer = ArrowStreamPandasUDFSerializer(
-            timezone=config.session_timezone,
-            safecheck=config.arrow_convert_safely,
-            assign_cols_by_name=config.assign_columns_by_name,
-            df_for_struct=False,
-            struct_in_pandas="row",
-            ndarray_as_list=True,
-            arrow_cast=True,
-        )
 
     def __call__(self, args: list[pa.Array]) -> pa.Array:
         [(output, output_type)] = list(self._udf(None, (args,)))
-        if isinstance(output, (pa.Array, pa.ChunkedArray)):
-            if isinstance(output, pa.ChunkedArray):
-                output = output.combine_chunks()
-            if output.type != output_type:
-                output = output.cast(output_type)
-            return output
-        return _pandas_to_arrow_array(output, output_type, self._serializer)
+        if isinstance(output, pa.ChunkedArray):
+            output = output.combine_chunks()
+        if not isinstance(output, pa.Array):
+            raise TypeError(
+                f"Arrow grouped aggregate UDF (eval_type 252) must return a pyarrow.Array, "
+                f"got {type(output).__name__!r}"
+            )
+        if output.type != output_type:
+            output = output.cast(output_type)
+        return output
 
 
 class PySparkGroupMapUdf:
