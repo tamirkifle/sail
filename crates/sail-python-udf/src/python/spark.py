@@ -517,7 +517,7 @@ class PySparkScalarArrowUdf:
     def __init__(
         self,
         udf: Callable[..., Any],
-        config,
+        _config,
     ):
         self._udf = udf
 
@@ -527,10 +527,8 @@ class PySparkScalarArrowUdf:
         if isinstance(output, pa.ChunkedArray):
             output = output.combine_chunks()
         if not isinstance(output, pa.Array):
-            raise TypeError(
-                f"Arrow UDF (eval_type 250) must return a pyarrow.Array, "
-                f"got {type(output).__name__!r}"
-            )
+            msg = f"Arrow UDF (eval_type 250) must return a pyarrow.Array, got {type(output).__name__!r}"
+            raise TypeError(msg)
         if output.type != output_type:
             output = output.cast(output_type)
         return output
@@ -546,7 +544,7 @@ class PySparkScalarArrowIterUdf:
     def __init__(
         self,
         udf: Callable[..., Any],
-        config,
+        _config,
     ):
         self._udf = udf
 
@@ -556,10 +554,8 @@ class PySparkScalarArrowIterUdf:
         if isinstance(output, pa.ChunkedArray):
             output = output.combine_chunks()
         if not isinstance(output, pa.Array):
-            raise TypeError(
-                f"Arrow iterator UDF (eval_type 251) must return a pyarrow.Array, "
-                f"got {type(output).__name__!r}"
-            )
+            msg = f"Arrow iterator UDF (eval_type 251) must return a pyarrow.Array, got {type(output).__name__!r}"
+            raise TypeError(msg)
         if output.type != output_type:
             output = output.cast(output_type)
         return output
@@ -600,7 +596,7 @@ class PySparkGroupAggArrowUdf:
     def __init__(
         self,
         udf: Callable[..., Any],
-        config,
+        _config,
     ):
         self._udf = udf
 
@@ -609,10 +605,11 @@ class PySparkGroupAggArrowUdf:
         if isinstance(output, pa.ChunkedArray):
             output = output.combine_chunks()
         if not isinstance(output, pa.Array):
-            raise TypeError(
+            msg = (
                 f"Arrow grouped aggregate UDF (eval_type 252) must return a pyarrow.Array, "
                 f"got {type(output).__name__!r}"
             )
+            raise TypeError(msg)
         if output.type != output_type:
             output = output.cast(output_type)
         return output
