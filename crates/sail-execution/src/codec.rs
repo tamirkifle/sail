@@ -181,6 +181,11 @@ use sail_function::scalar::struct_function::StructFunction;
 use sail_function::scalar::update_struct_field::UpdateStructField;
 use sail_function::scalar::url::parse_url::ParseUrl;
 use sail_function::scalar::url::spark_try_parse_url::SparkTryParseUrl;
+use sail_function::scalar::variant::spark_cast_to_variant::SparkCastToVariant;
+use sail_function::scalar::variant::spark_is_variant_null::SparkIsVariantNullUdf;
+use sail_function::scalar::variant::spark_json_to_variant::SparkJsonToVariantUdf;
+use sail_function::scalar::variant::spark_variant_get::SparkVariantGet;
+use sail_function::scalar::variant::spark_variant_to_json::SparkVariantToJsonUdf;
 use sail_function::scalar::xml::xpath::Xpath;
 use sail_function::scalar::xml::xpath_typed::{xpath_typed_name_to_kind, XpathTyped};
 use sail_iceberg::physical_plan::{IcebergCommitExec, IcebergWriterExec};
@@ -1852,6 +1857,12 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
             "raise_error" => Ok(Arc::new(ScalarUDF::from(RaiseError::new()))),
             "random_poisson" => Ok(Arc::new(ScalarUDF::from(RandPoisson::new()))),
             "randn" => Ok(Arc::new(ScalarUDF::from(Randn::new()))),
+            "spark_cast_to_variant" => Ok(Arc::new(ScalarUDF::from(SparkCastToVariant::new()))),
+            "is_variant_null" => Ok(Arc::new(ScalarUDF::from(SparkIsVariantNullUdf::new()))),
+            "variant_to_json" => Ok(Arc::new(ScalarUDF::from(SparkVariantToJsonUdf::new()))),
+            "parse_json" => Ok(Arc::new(ScalarUDF::from(SparkJsonToVariantUdf::new()))),
+            "variant_get" => Ok(Arc::new(ScalarUDF::from(SparkVariantGet::new(false)))),
+            "try_variant_get" => Ok(Arc::new(ScalarUDF::from(SparkVariantGet::new(true)))),
             "random" | "rand" => Ok(Arc::new(ScalarUDF::from(Random::new()))),
             "randstr" => Ok(Arc::new(ScalarUDF::from(Randstr::new()))),
             "format_number" => Ok(Arc::new(ScalarUDF::from(FormatNumber::new()))),
@@ -2054,6 +2065,10 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
             || node_inner.is::<SparkFromCSV>()
             || node_inner.is::<SparkHex>()
             || node_inner.is::<SparkIntervalDiv>()
+            || node_inner.is::<SparkCastToVariant>()
+            || node_inner.is::<SparkIsVariantNullUdf>()
+            || node_inner.is::<SparkJsonToVariantUdf>()
+            || node_inner.is::<SparkVariantGet>()
             || node_inner.is::<SparkLastDay>()
             || node_inner.is::<SparkLuhnCheck>()
             || node_inner.is::<SparkMakeDtInterval>()
@@ -2097,6 +2112,7 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
             || node_inner.is::<SparkTryToTimestamp>()
             || node_inner.is::<SparkUnbase64>()
             || node_inner.is::<SparkUnHex>()
+            || node_inner.is::<SparkVariantToJsonUdf>()
             || node_inner.is::<SparkVersion>()
             || node_inner.is::<SparkWidthBucket>()
             || node_inner.is::<SparkXxhash64>()
