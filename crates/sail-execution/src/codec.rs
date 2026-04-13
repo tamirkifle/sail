@@ -3137,6 +3137,11 @@ impl RemoteExecutionCodec {
                 .pandas_grouped_map_assign_columns_by_name,
             pandas_convert_to_arrow_array_safely: config.pandas_convert_to_arrow_array_safely,
             arrow_max_records_per_batch: config.arrow_max_records_per_batch as usize,
+            python_udf_pandas_conversion_enabled: config.python_udf_pandas_conversion_enabled,
+            python_udtf_pandas_conversion_enabled: config.python_udtf_pandas_conversion_enabled,
+            python_udf_pandas_int_to_decimal_coercion_enabled: config
+                .python_udf_pandas_int_to_decimal_coercion_enabled,
+            binary_as_bytes: config.binary_as_bytes,
         };
         Ok(config)
     }
@@ -3152,6 +3157,11 @@ impl RemoteExecutionCodec {
                 .pandas_grouped_map_assign_columns_by_name,
             pandas_convert_to_arrow_array_safely: config.pandas_convert_to_arrow_array_safely,
             arrow_max_records_per_batch: config.arrow_max_records_per_batch as u64,
+            python_udf_pandas_conversion_enabled: config.python_udf_pandas_conversion_enabled,
+            python_udtf_pandas_conversion_enabled: config.python_udtf_pandas_conversion_enabled,
+            python_udf_pandas_int_to_decimal_coercion_enabled: config
+                .python_udf_pandas_int_to_decimal_coercion_enabled,
+            binary_as_bytes: config.binary_as_bytes,
         };
         Ok(config)
     }
