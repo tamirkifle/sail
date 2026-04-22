@@ -88,6 +88,7 @@ message ExtendedScalarUdf {
     XpathTypedUdf xpath_typed = 13;
     SparkVariantGetUdf spark_variant_get = 14;
     SparkNextDayUdf spark_next_day = 15;
+    SparkTimeUdf spark_time = 16;
   }
 }
 
@@ -180,6 +181,10 @@ message SparkNextDayUdf {
 
 message SparkFromCsvUdf {
   string session_timezone = 1;
+}
+
+message SparkTimeUdf {
+  bool is_try = 1;
 }
 
 message StandardUdaf {}
