@@ -3,10 +3,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use datafusion::catalog::{Session, TableProvider};
-use datafusion::common::{not_impl_err, plan_err, DataFusionError, Result};
+use datafusion::common::{not_impl_err, plan_err, DFSchema, DataFusionError, Result};
 use datafusion::datasource::listing::ListingTableUrl;
 use datafusion::logical_expr::TableSource;
 use datafusion::physical_plan::ExecutionPlan;
+use sail_common_datafusion::column_features::ColumnFeatures;
 use sail_common_datafusion::datasource::{
     MergeStrategy, OptionLayer, PhysicalSinkMode, RowLevelCommand, RowLevelWriteInfo, SinkInfo,
     SourceInfo, TableFormat, TableFormatRegistry,
@@ -103,6 +104,7 @@ impl TableFormat for DeltaTableFormat {
             sort_order,
             table_properties,
             options,
+            logical_schema,
         } = info;
 
         if is_flow_event_schema(&input.schema()) {
@@ -242,7 +244,8 @@ impl TableFormat for DeltaTableFormat {
             partition_columns,
             table_schema_for_cond,
             table_exists,
-        );
+        )
+        .with_generation_expressions(extract_generation_expressions(logical_schema.as_deref()));
         let planner_ctx = PlannerContext::new(ctx, table_config);
         let planner = DeltaPhysicalPlanner::new(planner_ctx);
         let sink_exec = planner.create_plan(input, unified_mode, sort_order).await?;
@@ -423,6 +426,7 @@ impl TableFormat for DeltaTableFormat {
             false,
             false,
             TableProperties::from(new_config.iter()).enable_in_commit_timestamps(),
+            false,
             &new_config,
         )
         .map_err(|e| DataFusionError::External(Box::new(e)))?;
@@ -555,6 +559,21 @@ impl DeltaTableFormat {
             _ => plan_err!("expected a single path for Delta table sink: {paths:?}"),
         }
     }
+}
+
+fn extract_generation_expressions(logical_schema: Option<&DFSchema>) -> HashMap<String, String> {
+    let Some(schema) = logical_schema else {
+        return HashMap::new();
+    };
+    schema
+        .fields()
+        .iter()
+        .filter_map(|field| {
+            ColumnFeatures::from_map(field.metadata())
+                .generation_expression()
+                .map(|expr| (field.name().clone(), expr))
+        })
+        .collect()
 }
 
 /// Detect the merge strategy for a Delta table by inspecting its snapshot properties.

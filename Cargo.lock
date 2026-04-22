@@ -6854,6 +6854,7 @@ dependencies = [
  "sail-common",
  "serde",
  "serde_arrow",
+ "serde_json",
  "serde_yaml",
  "syn 2.0.117",
  "thiserror",
@@ -7112,6 +7113,7 @@ dependencies = [
  "log",
  "sail-common",
  "sail-common-datafusion",
+ "sail-function",
 ]
 
 [[package]]
