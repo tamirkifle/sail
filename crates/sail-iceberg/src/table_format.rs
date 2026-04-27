@@ -13,9 +13,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use datafusion::catalog::Session;
+use datafusion::catalog::{Session, TableProvider};
 use datafusion::common::{not_impl_err, plan_err, DataFusionError, Result};
-use datafusion::datasource::TableProvider;
 use datafusion::logical_expr::TableSource;
 use datafusion::physical_plan::ExecutionPlan;
 use sail_common_datafusion::catalog::CatalogPartitionField;
@@ -62,14 +61,6 @@ impl TableFormat for IcebergTableFormat {
     ) -> Result<Arc<dyn TableSource>> {
         let provider = build_iceberg_provider(ctx, info).await?;
         Ok(Arc::new(IcebergTableSource::new(provider)))
-    }
-
-    async fn create_provider(
-        &self,
-        ctx: &dyn Session,
-        info: SourceInfo,
-    ) -> Result<Arc<dyn TableProvider>> {
-        Ok(build_iceberg_provider(ctx, info).await?)
     }
 
     async fn create_writer(
