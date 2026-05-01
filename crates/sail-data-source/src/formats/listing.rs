@@ -61,7 +61,6 @@ impl SchemaInfer for DefaultSchemaInfer {
     }
 }
 
-// TODO: support global configuration to ignore file extension (by setting it to empty)
 /// A trait for defining the specifics of a listing table format.
 pub trait ListingFormat: Debug + Send + Sync + 'static {
     fn name(&self) -> &'static str;
@@ -155,6 +154,52 @@ impl<T: ListingFormat> TableFormat for ListingTableFormat<T> {
 
         let (schema, partition_by) = match schema {
             Some(schema) if !schema.fields().is_empty() => {
+                // Detect compression from the actual files so e.g.
+                // `data.csv.gz` plus an explicit schema works without
+                // `option("compression", "gzip")`.
+                crate::listing::detect_listing_compression(
+                    ctx,
+                    &urls,
+                    &mut listing_options,
+                    &extension_with_compression,
+                    &options,
+                    self,
+                )
+                .await?;
+                // When the caller did not supply partition columns, auto-
+                // discover them from `key=value` segments in the listing
+                // paths (matching the no-schema branch's behavior via
+                // `infer_partitions_from_path`). Without this, columns
+                // that exist only in the directory tree (e.g. `part=x/`)
+                // are treated as file columns, and the parquet/CSV reader
+                // fails because the file itself doesn't contain them.
+                //
+                // `ListingOptions::infer_partitions` uses DataFusion's
+                // case-sensitive `list_all_files`, so we have to clear
+                // the file-extension filter first or files like
+                // `data.PARQUET` won't be visible during discovery.
+                let partition_by = if partition_by.is_empty() {
+                    listing_options.file_extension = "".to_string();
+                    let mut discovered = vec![];
+                    for url in &urls {
+                        for name in listing_options.infer_partitions(ctx, url).await? {
+                            if !discovered.contains(&name) {
+                                discovered.push(name);
+                            }
+                        }
+                    }
+                    discovered
+                        .into_iter()
+                        .filter(|name| {
+                            schema
+                                .fields()
+                                .iter()
+                                .any(|f| f.name().eq_ignore_ascii_case(name))
+                        })
+                        .collect()
+                } else {
+                    partition_by
+                };
                 let (partition_by, schema) =
                     get_partition_columns_and_file_schema(&schema, partition_by)?;
                 (Arc::new(schema), partition_by)
@@ -177,7 +222,14 @@ impl<T: ListingFormat> TableFormat for ListingTableFormat<T> {
             }
         };
 
+        // Clear the file-extension filter on the listing options so that
+        // DataFusion's scan-time listing accepts every file admitted by the
+        // URL (which in turn excludes hidden files via the default glob
+        // attached in `resolve_listing_urls`). This matches Spark's
+        // behavior of reading every non-hidden file in a directory
+        // regardless of its extension.
         let listing_options = listing_options
+            .with_file_extension("")
             .with_file_sort_order(vec![sort_order])
             .with_table_partition_cols(partition_by);
 
