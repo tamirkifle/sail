@@ -2305,7 +2305,6 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
             || node_inner.is::<ArraysZip>()
             || node_inner.is::<SparkArrayCompact>()
             || node_inner.is::<BitmapCount>()
-            || node_inner.is::<ConvertTz>()
             || node_inner.is::<FormatStringFunc>()
             || node_inner.is::<GreatestFunc>()
             || node_inner.is::<LeastFunc>()
