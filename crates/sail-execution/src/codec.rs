@@ -2109,6 +2109,10 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 let udf = SparkFromJson::new(Arc::from(session_timezone));
                 return Ok(Arc::new(ScalarUDF::from(udf)));
             }
+            UdfKind::ConvertTz(gen::ConvertTzUdf { session_timezone }) => {
+                let udf = ConvertTz::new(session_timezone);
+                return Ok(Arc::new(ScalarUDF::from(udf)));
+            }
             UdfKind::SparkVariantGet(gen::SparkVariantGetUdf { safe }) => {
                 return Ok(Arc::new(ScalarUDF::from(SparkVariantGet::new(safe))));
             }
@@ -2125,7 +2129,6 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
             "arrays_zip" => Ok(Arc::new(ScalarUDF::from(ArraysZip::new()))),
             "spark_array_compact" => Ok(Arc::new(ScalarUDF::from(SparkArrayCompact::new()))),
             "bitmap_count" => Ok(Arc::new(ScalarUDF::from(BitmapCount::new()))),
-            "convert_tz" => Ok(Arc::new(ScalarUDF::from(ConvertTz::new()))),
             "format_string" => Ok(Arc::new(ScalarUDF::from(FormatStringFunc::new()))),
             "greatest" => Ok(Arc::new(ScalarUDF::from(GreatestFunc::new()))),
             "least" => Ok(Arc::new(ScalarUDF::from(LeastFunc::new()))),
@@ -2505,6 +2508,9 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
         } else if let Some(func) = node.inner().as_any().downcast_ref::<SparkNextDay>() {
             let ansi_mode = func.ansi_mode();
             UdfKind::SparkNextDay(gen::SparkNextDayUdf { ansi_mode })
+        } else if let Some(func) = node.inner().as_any().downcast_ref::<ConvertTz>() {
+            let session_timezone = func.session_timezone().to_string();
+            UdfKind::ConvertTz(gen::ConvertTzUdf { session_timezone })
         } else {
             return Ok(());
         };

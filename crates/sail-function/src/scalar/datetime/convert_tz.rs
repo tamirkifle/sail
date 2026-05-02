@@ -2,7 +2,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use chrono::{Local, TimeZone};
+use chrono::{TimeZone, Utc};
 use chrono_tz::Tz;
 use datafusion::arrow::array::{Array, ArrayRef, AsArray, Int64Array, UInt64Array};
 use datafusion::arrow::compute::kernels::{cast, numeric, take};
@@ -18,19 +18,27 @@ use sail_common::datetime::time_unit_to_multiplier;
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct ConvertTz {
     signature: Signature,
+    /// Session timezone used for output Arrow type metadata.
+    /// LTZ timestamps are displayed in the session timezone.
+    session_timezone: Arc<str>,
 }
 
 impl ConvertTz {
-    pub fn new() -> Self {
+    pub fn new(session_timezone: String) -> Self {
         Self {
             signature: Signature::any(3, Volatility::Immutable),
+            session_timezone: Arc::from(session_timezone),
         }
+    }
+
+    pub fn session_timezone(&self) -> &str {
+        &self.session_timezone
     }
 }
 
 impl Default for ConvertTz {
     fn default() -> Self {
-        ConvertTz::new()
+        ConvertTz::new("UTC".to_string())
     }
 }
 
@@ -51,24 +59,23 @@ impl ScalarUDFImpl for ConvertTz {
         if arg_types.len() != 3 {
             return plan_err!("`convert_tz` takes 3 arguments: from, to, timestamp");
         }
+        let tz_meta = Some(self.session_timezone.clone());
         match &arg_types[2] {
-            DataType::Timestamp(unit, _tz) => Ok(DataType::Timestamp(*unit, local_offset_opt())),
-            _ => Ok(DataType::Timestamp(
-                TimeUnit::Microsecond,
-                local_offset_opt(),
-            )), // TODO: strict type coersion
+            DataType::Timestamp(unit, _tz) => Ok(DataType::Timestamp(*unit, tz_meta)),
+            _ => Ok(DataType::Timestamp(TimeUnit::Microsecond, tz_meta)),
         }
     }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
+        let session_tz = self.session_timezone.clone();
         make_scalar_function(
-            convert_tz_inner,
+            move |args| convert_tz_inner(args, &session_tz),
             [Hint::AcceptsSingular].repeat(args.args.len()),
         )(args.args.as_slice())
     }
 }
 
-fn convert_tz_inner(args: &[ArrayRef]) -> Result<ArrayRef> {
+fn convert_tz_inner(args: &[ArrayRef], session_tz: &Arc<str>) -> Result<ArrayRef> {
     let legacy_timezones = HashMap::from([
         ("ACT", "Australia/Darwin"),
         ("AET", "Australia/Sydney"),
@@ -129,11 +136,21 @@ fn convert_tz_inner(args: &[ArrayRef]) -> Result<ArrayRef> {
             .map(|opt| opt.flatten())
     };
 
+    // For NTZ inputs (tz = None) the stored epoch is "wall-clock time treated as UTC".
+    // Applying to_zone before from_zone would shift the naive time incorrectly.
+    // Instead, extract the naive UTC directly, then interpret in from_zone.
+    let input_is_ntz = matches!(args[2].data_type(), DataType::Timestamp(_, None));
+
     let from_to_utc_timestamp_func =
-        |inputs: (Option<i64>, Result<Option<Tz>>, Result<Option<Tz>>)| match inputs {
+        move |inputs: (Option<i64>, Result<Option<Tz>>, Result<Option<Tz>>)| match inputs {
             (Some(ts_nanos), Ok(Some(from_tz)), Ok(Some(to_tz))) => {
-                tz_shifted_utc_nanos(ts_nanos, &from_tz, &to_tz).map_or_else(
-                    || exec_err!("convert_timezone``: failed to set timezone offset"),
+                let result = if input_is_ntz {
+                    ntz_naive_to_utc_nanos(ts_nanos, &from_tz)
+                } else {
+                    tz_shifted_utc_nanos(ts_nanos, &from_tz, &to_tz)
+                };
+                result.map_or_else(
+                    || exec_err!("convert_timezone: failed to set timezone offset"),
                     |ts| Ok(Some(ts)),
                 )
             }
@@ -145,7 +162,7 @@ fn convert_tz_inner(args: &[ArrayRef]) -> Result<ArrayRef> {
         DataType::Timestamp(_time_unit, _tz) => args[2].clone(),
         _ => cast::cast(
             &args[2],
-            &DataType::Timestamp(TimeUnit::Microsecond, local_offset_opt()),
+            &DataType::Timestamp(TimeUnit::Microsecond, Some(session_tz.clone())),
         )?,
     };
 
@@ -224,11 +241,10 @@ fn convert_tz_inner(args: &[ArrayRef]) -> Result<ArrayRef> {
         _ => TimeUnit::Microsecond,
     };
 
-    nanoseconds_to_timestamp(results, &DataType::Timestamp(time_unit, local_offset_opt()))
-}
-
-fn local_offset_opt() -> Option<Arc<str>> {
-    Some(Arc::from(Local::now().offset().to_string()))
+    nanoseconds_to_timestamp(
+        results,
+        &DataType::Timestamp(time_unit, Some(session_tz.clone())),
+    )
 }
 
 fn tz_shifted_utc_nanos<T1: TimeZone + Clone, T2: TimeZone + Clone>(
@@ -239,6 +255,16 @@ fn tz_shifted_utc_nanos<T1: TimeZone + Clone, T2: TimeZone + Clone>(
     to_zone
         .timestamp_nanos(ts_nanos)
         .naive_local()
+        .and_local_timezone(from_zone.clone())
+        .single()
+        .and_then(|ts| ts.to_utc().timestamp_nanos_opt())
+}
+
+/// For NTZ timestamps: the stored epoch is "wall-clock time treated as UTC".
+/// Extract that naive time and reinterpret it in `from_zone` to get the true UTC epoch.
+fn ntz_naive_to_utc_nanos<T: TimeZone>(ts_nanos: i64, from_zone: &T) -> Option<i64> {
+    Utc.timestamp_nanos(ts_nanos)
+        .naive_utc()
         .and_local_timezone(from_zone.clone())
         .single()
         .and_then(|ts| ts.to_utc().timestamp_nanos_opt())
@@ -268,7 +294,7 @@ fn timestamp_to_nanoseconds(array: &dyn Array) -> Result<Int64Array> {
 
 fn nanoseconds_to_timestamp(array: Int64Array, data_type: &DataType) -> Result<ArrayRef> {
     match data_type {
-        DataType::Timestamp(time_unit, _tz) => Ok(cast::cast(
+        DataType::Timestamp(time_unit, tz) => Ok(cast::cast(
             &numeric::div(
                 &array,
                 &numeric::div(
@@ -276,10 +302,7 @@ fn nanoseconds_to_timestamp(array: Int64Array, data_type: &DataType) -> Result<A
                     &Int64Array::new_scalar(time_unit_to_multiplier(time_unit)),
                 )?,
             )?,
-            &DataType::Timestamp(
-                *time_unit,
-                Some(Arc::from(Local::now().offset().to_string())),
-            ),
+            &DataType::Timestamp(*time_unit, tz.clone()),
         )?),
         _ => {
             exec_err!(

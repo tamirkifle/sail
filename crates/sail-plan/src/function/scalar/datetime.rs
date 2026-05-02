@@ -232,11 +232,15 @@ fn datediff(input: ScalarFunctionInput) -> PlanResult<Expr> {
 }
 
 fn session_timezone(input: &ScalarFunctionInput) -> Expr {
-    lit(input
+    lit(session_timezone_string(input))
+}
+
+fn session_timezone_string(input: &ScalarFunctionInput) -> String {
+    input
         .function_context
         .plan_config
         .session_timezone
-        .to_string())
+        .to_string()
 }
 
 fn current_timezone(input: ScalarFunctionInput) -> PlanResult<Expr> {
@@ -406,11 +410,12 @@ fn current_localtimestamp_microseconds(input: ScalarFunctionInput) -> PlanResult
     Ok(expr_fn::to_local_time(vec![expr]))
 }
 
-fn convert_tz(from_tz: Expr, to_tz: Expr, ts: Expr) -> Expr {
-    ScalarUDF::from(ConvertTz::new()).call(vec![from_tz, to_tz, ts])
+fn convert_tz(from_tz: Expr, to_tz: Expr, ts: Expr, session_tz: String) -> Expr {
+    ScalarUDF::from(ConvertTz::new(session_tz)).call(vec![from_tz, to_tz, ts])
 }
 
 fn convert_timezone(input: ScalarFunctionInput) -> PlanResult<Expr> {
+    let tz_string = session_timezone_string(&input);
     let session_tz = session_timezone(&input);
     let args = input.arguments;
     let (from_tz, to_tz, ts) = match args.len() {
@@ -423,19 +428,21 @@ fn convert_timezone(input: ScalarFunctionInput) -> PlanResult<Expr> {
             "convert_timezone takes 2 or three arguments, got {args:?}"
         ))),
     }?;
-    Ok(convert_tz(from_tz, to_tz, ts))
+    Ok(convert_tz(from_tz, to_tz, ts, tz_string))
 }
 
 fn from_utc_timestamp(input: ScalarFunctionInput) -> PlanResult<Expr> {
+    let tz_string = session_timezone_string(&input);
     let session_tz = session_timezone(&input);
     let (ts, to_tz) = input.arguments.two()?;
-    Ok(convert_tz(session_tz, to_tz, ts))
+    Ok(convert_tz(session_tz, to_tz, ts, tz_string))
 }
 
 fn to_utc_timestamp(input: ScalarFunctionInput) -> PlanResult<Expr> {
+    let tz_string = session_timezone_string(&input);
     let session_tz = session_timezone(&input);
     let (ts, from_tz) = input.arguments.two()?;
-    Ok(convert_tz(from_tz, session_tz, ts))
+    Ok(convert_tz(from_tz, session_tz, ts, tz_string))
 }
 
 fn make_ym_interval(args: Vec<Expr>) -> PlanResult<Expr> {
@@ -456,18 +463,29 @@ fn make_timestamp(input: ScalarFunctionInput) -> PlanResult<Expr> {
     //   - Components without explicit timezone → interpreted as session timezone
     //   - Components with explicit timezone → interpreted as that timezone
     //   - Result is always LTZ (Timestamp), displayed in session timezone
+    let tz_string = session_timezone_string(&input);
     if input.arguments.len() == 1 {
         // make_timestamp(date) defaults time to 00:00:00, interpreted in session timezone
         let session_tz = session_timezone(&input);
         let date = input.arguments.one()?;
         let default_time = lit(ScalarValue::Time64Microsecond(Some(0)));
         let ntz_ts = ScalarUDF::from(SparkMakeTimestampNtz::new()).call(vec![date, default_time]);
-        Ok(convert_tz(session_tz.clone(), session_tz, ntz_ts))
+        Ok(convert_tz(
+            session_tz.clone(),
+            session_tz,
+            ntz_ts,
+            tz_string,
+        ))
     } else if input.arguments.len() == 2 {
         // make_timestamp(date, time) interpreted in session timezone
         let session_tz = session_timezone(&input);
         let ntz_ts = ScalarUDF::from(SparkMakeTimestampNtz::new()).call(input.arguments);
-        Ok(convert_tz(session_tz.clone(), session_tz, ntz_ts))
+        Ok(convert_tz(
+            session_tz.clone(),
+            session_tz,
+            ntz_ts,
+            tz_string,
+        ))
     } else if input.arguments.len() == 3 {
         // make_timestamp(date, time, timezone)
         let session_tz = session_timezone(&input);
@@ -477,14 +495,18 @@ fn make_timestamp(input: ScalarFunctionInput) -> PlanResult<Expr> {
                 "make_timestamp: empty args array with len = 3, should be unreachable",
             )
         })?;
-
         let ntz_ts = ScalarUDF::from(SparkMakeTimestampNtz::new()).call(args);
-        Ok(convert_tz(from_tz, session_tz, ntz_ts))
+        Ok(convert_tz(from_tz, session_tz, ntz_ts, tz_string))
     } else if input.arguments.len() == 6 {
         // make_timestamp(year, month, day, hour, min, sec) interpreted in session timezone
         let session_tz = session_timezone(&input);
         let ntz_ts = ScalarUDF::from(SparkMakeTimestampNtz::new()).call(input.arguments);
-        Ok(convert_tz(session_tz.clone(), session_tz, ntz_ts))
+        Ok(convert_tz(
+            session_tz.clone(),
+            session_tz,
+            ntz_ts,
+            tz_string,
+        ))
     } else if input.arguments.len() == 7 {
         // make_timestamp(year, month, day, hour, min, sec, timezone)
         let session_tz = session_timezone(&input);
@@ -494,9 +516,8 @@ fn make_timestamp(input: ScalarFunctionInput) -> PlanResult<Expr> {
                 "make_timestamp: empty args array with len = 7, should be unreachable",
             )
         })?;
-
         let ntz_ts = ScalarUDF::from(SparkMakeTimestampNtz::new()).call(args);
-        Ok(convert_tz(from_tz, session_tz, ntz_ts))
+        Ok(convert_tz(from_tz, session_tz, ntz_ts, tz_string))
     } else {
         Err(PlanError::invalid(format!(
             "make_timestamp requires 1, 2, 3, 6 or 7 arguments, got {:?}",
@@ -518,17 +539,28 @@ fn make_timestamp_ntz(input: ScalarFunctionInput) -> PlanResult<Expr> {
 
 fn try_make_timestamp(input: ScalarFunctionInput) -> PlanResult<Expr> {
     // try_make_timestamp returns LTZ, same as make_timestamp but returns NULL on error.
+    let tz_string = session_timezone_string(&input);
     if input.arguments.len() == 1 {
         let session_tz = session_timezone(&input);
         let date = input.arguments.one()?;
         let default_time = lit(ScalarValue::Time64Microsecond(Some(0)));
         let ntz_ts =
             ScalarUDF::from(SparkTryMakeTimestampNtz::new()).call(vec![date, default_time]);
-        Ok(convert_tz(session_tz.clone(), session_tz, ntz_ts))
+        Ok(convert_tz(
+            session_tz.clone(),
+            session_tz,
+            ntz_ts,
+            tz_string,
+        ))
     } else if input.arguments.len() == 2 {
         let session_tz = session_timezone(&input);
         let ntz_ts = ScalarUDF::from(SparkTryMakeTimestampNtz::new()).call(input.arguments);
-        Ok(convert_tz(session_tz.clone(), session_tz, ntz_ts))
+        Ok(convert_tz(
+            session_tz.clone(),
+            session_tz,
+            ntz_ts,
+            tz_string,
+        ))
     } else if input.arguments.len() == 3 {
         let session_tz = session_timezone(&input);
         let mut args = input.arguments;
@@ -537,13 +569,17 @@ fn try_make_timestamp(input: ScalarFunctionInput) -> PlanResult<Expr> {
                 "try_make_timestamp: empty args array with len = 3, should be unreachable",
             )
         })?;
-
         let ntz_ts = ScalarUDF::from(SparkTryMakeTimestampNtz::new()).call(args);
-        Ok(convert_tz(from_tz, session_tz, ntz_ts))
+        Ok(convert_tz(from_tz, session_tz, ntz_ts, tz_string))
     } else if input.arguments.len() == 6 {
         let session_tz = session_timezone(&input);
         let ntz_ts = ScalarUDF::from(SparkTryMakeTimestampNtz::new()).call(input.arguments);
-        Ok(convert_tz(session_tz.clone(), session_tz, ntz_ts))
+        Ok(convert_tz(
+            session_tz.clone(),
+            session_tz,
+            ntz_ts,
+            tz_string,
+        ))
     } else if input.arguments.len() == 7 {
         let session_tz = session_timezone(&input);
         let mut args = input.arguments;
@@ -552,9 +588,8 @@ fn try_make_timestamp(input: ScalarFunctionInput) -> PlanResult<Expr> {
                 "try_make_timestamp: empty args array with len = 7, should be unreachable",
             )
         })?;
-
         let ntz_ts = ScalarUDF::from(SparkTryMakeTimestampNtz::new()).call(args);
-        Ok(convert_tz(from_tz, session_tz, ntz_ts))
+        Ok(convert_tz(from_tz, session_tz, ntz_ts, tz_string))
     } else {
         Err(PlanError::invalid(format!(
             "try_make_timestamp requires 1, 2, 3, 6 or 7 arguments, got {:?}",
