@@ -2109,8 +2109,15 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 let udf = SparkFromJson::new(Arc::from(session_timezone));
                 return Ok(Arc::new(ScalarUDF::from(udf)));
             }
-            UdfKind::ConvertTz(gen::ConvertTzUdf { session_timezone }) => {
-                let udf = ConvertTz::new(session_timezone);
+            UdfKind::ConvertTz(gen::ConvertTzUdf {
+                session_timezone,
+                return_ntz,
+            }) => {
+                let udf = if return_ntz {
+                    ConvertTz::new_ntz(session_timezone)
+                } else {
+                    ConvertTz::new(session_timezone)
+                };
                 return Ok(Arc::new(ScalarUDF::from(udf)));
             }
             UdfKind::SparkVariantGet(gen::SparkVariantGetUdf { safe }) => {
@@ -2509,7 +2516,11 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
             UdfKind::SparkNextDay(gen::SparkNextDayUdf { ansi_mode })
         } else if let Some(func) = node.inner().as_any().downcast_ref::<ConvertTz>() {
             let session_timezone = func.session_timezone().to_string();
-            UdfKind::ConvertTz(gen::ConvertTzUdf { session_timezone })
+            let return_ntz = func.return_ntz();
+            UdfKind::ConvertTz(gen::ConvertTzUdf {
+                session_timezone,
+                return_ntz,
+            })
         } else {
             return Ok(());
         };

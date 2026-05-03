@@ -200,6 +200,7 @@ message SparkFromJsonUdf {
 
 message ConvertTzUdf {
   string session_timezone = 1;
+  bool return_ntz = 2;
 }
 
 message StandardUdaf {}

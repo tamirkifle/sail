@@ -414,6 +414,11 @@ fn convert_tz(from_tz: Expr, to_tz: Expr, ts: Expr, session_tz: String) -> Expr 
     ScalarUDF::from(ConvertTz::new(session_tz)).call(vec![from_tz, to_tz, ts])
 }
 
+/// Like convert_tz but returns TIMESTAMP_NTZ (wall-clock in target timezone).
+fn convert_tz_ntz(from_tz: Expr, to_tz: Expr, ts: Expr, session_tz: String) -> Expr {
+    ScalarUDF::from(ConvertTz::new_ntz(session_tz)).call(vec![from_tz, to_tz, ts])
+}
+
 fn convert_timezone(input: ScalarFunctionInput) -> PlanResult<Expr> {
     let tz_string = session_timezone_string(&input);
     let session_tz = session_timezone(&input);
@@ -428,10 +433,12 @@ fn convert_timezone(input: ScalarFunctionInput) -> PlanResult<Expr> {
             "convert_timezone takes 2 or three arguments, got {args:?}"
         ))),
     }?;
-    Ok(convert_tz(from_tz, to_tz, ts, tz_string))
+    Ok(convert_tz_ntz(from_tz, to_tz, ts, tz_string))
 }
 
 fn from_utc_timestamp(input: ScalarFunctionInput) -> PlanResult<Expr> {
+    // session_tz is passed as from_tz because for NTZ inputs Spark treats the
+    // wall-clock value as being in the session timezone, not UTC.
     let tz_string = session_timezone_string(&input);
     let session_tz = session_timezone(&input);
     let (ts, to_tz) = input.arguments.two()?;

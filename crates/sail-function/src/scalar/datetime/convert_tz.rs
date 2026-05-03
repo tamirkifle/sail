@@ -21,6 +21,9 @@ pub struct ConvertTz {
     /// Session timezone used for output Arrow type metadata.
     /// LTZ timestamps are displayed in the session timezone.
     session_timezone: Arc<str>,
+    /// When true, the result is TIMESTAMP_NTZ: the wall-clock in the target timezone.
+    /// When false, the result is TIMESTAMP_LTZ with session timezone metadata.
+    return_ntz: bool,
 }
 
 impl ConvertTz {
@@ -28,11 +31,24 @@ impl ConvertTz {
         Self {
             signature: Signature::any(3, Volatility::Immutable),
             session_timezone: Arc::from(session_timezone),
+            return_ntz: false,
+        }
+    }
+
+    pub fn new_ntz(session_timezone: String) -> Self {
+        Self {
+            signature: Signature::any(3, Volatility::Immutable),
+            session_timezone: Arc::from(session_timezone),
+            return_ntz: true,
         }
     }
 
     pub fn session_timezone(&self) -> &str {
         &self.session_timezone
+    }
+
+    pub fn return_ntz(&self) -> bool {
+        self.return_ntz
     }
 }
 
@@ -59,23 +75,35 @@ impl ScalarUDFImpl for ConvertTz {
         if arg_types.len() != 3 {
             return plan_err!("`convert_tz` takes 3 arguments: from, to, timestamp");
         }
-        let tz_meta = Some(self.session_timezone.clone());
-        match &arg_types[2] {
-            DataType::Timestamp(unit, _tz) => Ok(DataType::Timestamp(*unit, tz_meta)),
-            _ => Ok(DataType::Timestamp(TimeUnit::Microsecond, tz_meta)),
+        let unit = match &arg_types[2] {
+            DataType::Timestamp(unit, _) => *unit,
+            _ => TimeUnit::Microsecond,
+        };
+        if self.return_ntz {
+            Ok(DataType::Timestamp(unit, None))
+        } else {
+            Ok(DataType::Timestamp(
+                unit,
+                Some(self.session_timezone.clone()),
+            ))
         }
     }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
         let session_tz = self.session_timezone.clone();
+        let return_ntz = self.return_ntz;
         make_scalar_function(
-            move |args| convert_tz_inner(args, &session_tz),
+            move |args| convert_tz_inner(args, &session_tz, return_ntz),
             [Hint::AcceptsSingular].repeat(args.args.len()),
         )(args.args.as_slice())
     }
 }
 
-fn convert_tz_inner(args: &[ArrayRef], session_tz: &Arc<str>) -> Result<ArrayRef> {
+fn convert_tz_inner(
+    args: &[ArrayRef],
+    session_tz: &Arc<str>,
+    return_ntz: bool,
+) -> Result<ArrayRef> {
     let legacy_timezones = HashMap::from([
         ("ACT", "Australia/Darwin"),
         ("AET", "Australia/Sydney"),
@@ -136,16 +164,23 @@ fn convert_tz_inner(args: &[ArrayRef], session_tz: &Arc<str>) -> Result<ArrayRef
             .map(|opt| opt.flatten())
     };
 
-    // For NTZ inputs (tz = None) the stored epoch is "wall-clock time treated as UTC".
-    // Applying to_zone before from_zone would shift the naive time incorrectly.
-    // Instead, extract the naive UTC directly, then interpret in from_zone.
+    // NTZ timestamps store wall-clock time as a UTC epoch.
+    // For NTZ inputs we extract the naive datetime directly and reinterpret it in from_zone;
+    // for return_ntz=true we additionally re-wall-clock the result in to_zone.
     let input_is_ntz = matches!(args[2].data_type(), DataType::Timestamp(_, None));
 
     let from_to_utc_timestamp_func =
         move |inputs: (Option<i64>, Result<Option<Tz>>, Result<Option<Tz>>)| match inputs {
             (Some(ts_nanos), Ok(Some(from_tz)), Ok(Some(to_tz))) => {
                 let result = if input_is_ntz {
-                    ntz_naive_to_utc_nanos(ts_nanos, &from_tz)
+                    if return_ntz {
+                        // NTZ → NTZ: wall-clock in from_tz → wall-clock in to_tz
+                        ntz_to_ntz_nanos(ts_nanos, &from_tz, &to_tz)
+                    } else {
+                        // NTZ → UTC epoch (stored as LTZ).
+                        // to_tz is not used here; the session timezone is baked into return_type().
+                        ntz_naive_to_utc_nanos(ts_nanos, &from_tz)
+                    }
                 } else {
                     tz_shifted_utc_nanos(ts_nanos, &from_tz, &to_tz)
                 };
@@ -241,10 +276,12 @@ fn convert_tz_inner(args: &[ArrayRef], session_tz: &Arc<str>) -> Result<ArrayRef
         _ => TimeUnit::Microsecond,
     };
 
-    nanoseconds_to_timestamp(
-        results,
-        &DataType::Timestamp(time_unit, Some(session_tz.clone())),
-    )
+    let output_type = if return_ntz {
+        DataType::Timestamp(time_unit, None)
+    } else {
+        DataType::Timestamp(time_unit, Some(session_tz.clone()))
+    };
+    nanoseconds_to_timestamp(results, &output_type)
 }
 
 fn tz_shifted_utc_nanos<T1: TimeZone + Clone, T2: TimeZone + Clone>(
@@ -258,6 +295,22 @@ fn tz_shifted_utc_nanos<T1: TimeZone + Clone, T2: TimeZone + Clone>(
         .and_local_timezone(from_zone.clone())
         .single()
         .and_then(|ts| ts.to_utc().timestamp_nanos_opt())
+}
+
+/// For convert_timezone (NTZ → NTZ): convert wall-clock in from_zone to wall-clock in to_zone.
+/// Matches Spark's `DateTimeUtils.convertTimestampNtzToAnotherTz`.
+fn ntz_to_ntz_nanos<T1: TimeZone, T2: TimeZone>(
+    ts_nanos: i64,
+    from_zone: &T1,
+    to_zone: &T2,
+) -> Option<i64> {
+    let naive = Utc.timestamp_nanos(ts_nanos).naive_utc();
+    let utc = naive
+        .and_local_timezone(from_zone.clone())
+        .single()?
+        .to_utc();
+    let to_naive = utc.with_timezone(to_zone).naive_local();
+    to_naive.and_utc().timestamp_nanos_opt()
 }
 
 /// For NTZ timestamps: the stored epoch is "wall-clock time treated as UTC".
